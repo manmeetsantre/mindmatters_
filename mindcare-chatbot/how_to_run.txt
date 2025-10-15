@@ -1,0 +1,5 @@
+In .env add your api key
+then in terminal run: npm run dev or npm start
+
+clear browser cache and restart the server:
+taskkill /F /IM node.exe && npm run dev

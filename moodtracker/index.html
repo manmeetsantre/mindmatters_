@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Facial Emotion Detection</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.1.3/css/bootstrap.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <nav class="navbar navbar-expand-lg navbar-light">
+        <div class="container">
+            <a class="navbar-brand" href="#">MAITRI</a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav" 
+                aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+        </div>
+    </nav>
+
+    <div class="container my-5">
+        <h1 class="app-title fade-in">Mood Tracker <i class="fas fa-smile"></i></h1>
+
+        <div class="card upload-card p-4">
+            <form action="/" method="POST" enctype="multipart/form-data" id="upload-form">
+                <div class="mb-3">
+                    <label for="file" class="form-label">Upload Image</label>
+                    <input type="file" name="file" id="file" class="form-control" required>
+                </div>
+                <input type="hidden" name="captured_image" id="captured_image">
+                <button type="submit" class="btn btn-primary w-100">
+                    <i class="fas fa-upload me-2"></i> Upload & Detect Emotion
+                </button>
+            </form>
+        </div>
+
+        <div class="card camera-card p-4">
+            <h5 class="card-header">Camera Capture</h5>
+            <div class="d-flex flex-column align-items-center">
+                <button id="start-camera" class="btn btn-secondary mb-3">
+                    <i class="fas fa-camera"></i> Take Photo with Camera
+                </button>
+                <video id="video" width="320" height="240" autoplay style="display:none;" class="mb-3 rounded"></video>
+                <canvas id="canvas" width="320" height="240" style="display:none;"></canvas>
+                <button id="capture" class="btn btn-success" style="display:none;">
+                    <i class="fas fa-check"></i> Capture Photo
+                </button>
+            </div>
+        </div>
+
+        {% if image_path %}
+        <div class="card result-card p-4 fade-in">
+            <h5 class="card-header">Prediction Result</h5>
+            <img src="{{ image_path }}" alt="Uploaded Image" class="result-image rounded mx-auto d-block my-3">
+            <h3 class="emotion-label text-center">Emotion: <span class="highlight">{{ emotion }}</span></h3>
+            <div class="d-flex justify-content-center gap-2 mt-3">
+                <button class="btn btn-primary" style="width: 150px;" onclick="window.location.href='http://localhost:8080/mood?emotion={{ emotion }}'">Check Result</button>
+                <button class="btn btn-secondary" style="width: 200px;" onclick="window.location.href='http://127.0.0.1:5000/'">Advanced Voice Analysis</button>
+            </div>
+        </div>
+        <script>
+            document.addEventListener('DOMContentLoaded', () => {
+                const emojis = getEmojisForEmotion("{{ emotion }}");
+                animateEmojis(emojis);
+            });
+        </script>
+        {% endif %}
+    </div>
+
+    <div id="emoji-container" style="position: fixed; bottom: 0; left: 50%; transform: translateX(-50%); pointer-events: none; z-index: 1050;"></div>
+
+    <div class="loading-overlay" id="loading-overlay">
+        <div class="spinner-border" role="status" aria-hidden="true"></div>
+    </div>
+
+
+
+    <script>
+        const startCameraBtn = document.getElementById('start-camera');
+        const video = document.getElementById('video');
+        const canvas = document.getElementById('canvas');
+        const captureBtn = document.getElementById('capture');
+        const capturedInput = document.getElementById('captured_image');
+        const loadingOverlay = document.getElementById('loading-overlay');
+        const uploadForm = document.getElementById('upload-form');
+        const emojiContainer = document.getElementById('emoji-container');
+        let stream;
+
+        function createEmojiElement(emoji) {
+            const span = document.createElement('span');
+            span.textContent = emoji;
+            span.style.position = 'absolute';
+            span.style.bottom = '0px';
+            span.style.left = Math.random() * 100 + '%';
+            span.style.fontSize = (20 + Math.random() * 30) + 'px';
+            span.style.opacity = '1';
+            span.style.transition = 'transform 3s ease-out, opacity 3s ease-out';
+            return span;
+        }
+
+        function animateEmojis(emojis) {
+            emojis.forEach((emoji, index) => {
+                const emojiEl = createEmojiElement(emoji);
+                emojiContainer.appendChild(emojiEl);
+                const delay = index * 100; // Stagger the animations
+                const horizontalOffset = (Math.random() - 0.5) * 400; // Random horizontal movement
+                setTimeout(() => {
+                    emojiEl.style.transform = `translateY(-300px) translateX(${horizontalOffset}px)`;
+                    emojiEl.style.opacity = '0';
+                }, 100 + delay);
+                setTimeout(() => {
+                    emojiContainer.removeChild(emojiEl);
+                }, 3100 + delay);
+            });
+        }
+
+        function getEmojisForEmotion(emotion) {
+            const emojiMap = {
+                happy: ['😊', '😄', '😃', '😁', '😆', '😊', '😄', '😃', '😁', '😆'],
+                sad: ['😢', '😞', '😔', '😟', '😥', '😢', '😞', '😔', '😟', '😥'],
+                angry: ['😠', '😡', '🤬', '😤', '😠', '😡', '🤬', '😤'],
+                surprise: ['😲', '😯', '😮', '😳', '😲', '😯', '😮', '😳'],
+                fear: ['😨', '😰', '😱', '😧', '😨', '😰', '😱', '😧'],
+                disgust: ['🤢', '🤮', '😖', '😫', '🤢', '🤮', '😖', '😫'],
+                neutral: ['😐', '😑', '😶', '😐', '😑', '😶']
+            };
+            return emojiMap[emotion.toLowerCase()] || ['🙂'];
+        }
+
+        startCameraBtn.addEventListener('click', async () => {
+            try {
+                stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } });
+                video.srcObject = stream;
+                video.style.display = 'block';
+                captureBtn.style.display = 'block';
+                startCameraBtn.style.display = 'none';
+            } catch (err) {
+                console.error('Error accessing camera:', err);
+                alert('Unable to access camera. Please check permissions.');
+            }
+        });
+
+        captureBtn.addEventListener('click', () => {
+            const context = canvas.getContext('2d');
+            context.drawImage(video, 0, 0, canvas.width, canvas.height);
+            const dataURL = canvas.toDataURL('image/png');
+            capturedInput.value = dataURL;
+            // Stop the stream
+            stream.getTracks().forEach(track => track.stop());
+            video.style.display = 'none';
+            captureBtn.style.display = 'none';
+            startCameraBtn.style.display = 'block';
+            // Submit the form
+            uploadForm.submit();
+        });
+
+        uploadForm.addEventListener('submit', () => {
+            loadingOverlay.style.display = 'flex';
+        });
+    </script>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.1.3/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>

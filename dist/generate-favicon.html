@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Generate Brain Favicon</title>
+</head>
+<body>
+    <h2>Brain Favicon Generator</h2>
+    <p>This page can be used to generate the brain favicon in different formats.</p>
+    
+    <canvas id="canvas" width="32" height="32" style="border: 1px solid #ccc; margin: 10px;"></canvas>
+    <br>
+    <button onclick="generateFavicon()">Generate Brain Favicon</button>
+    
+    <script>
+        function generateFavicon() {
+            const canvas = document.getElementById('canvas');
+            const ctx = canvas.getContext('2d');
+            
+            // Clear canvas
+            ctx.clearRect(0, 0, 32, 32);
+            
+            // Draw brain shape
+            ctx.fillStyle = '#3B82F6';
+            ctx.beginPath();
+            ctx.arc(16, 16, 12, 0, 2 * Math.PI);
+            ctx.fill();
+            
+            // Draw brain details
+            ctx.fillStyle = '#1E40AF';
+            ctx.beginPath();
+            ctx.arc(12, 12, 2, 0, 2 * Math.PI);
+            ctx.fill();
+            
+            ctx.beginPath();
+            ctx.arc(20, 12, 2, 0, 2 * Math.PI);
+            ctx.fill();
+            
+            // Draw brain wrinkles
+            ctx.strokeStyle = '#1E40AF';
+            ctx.lineWidth = 1;
+            
+            // Top wrinkles
+            ctx.beginPath();
+            ctx.arc(12, 16, 2, 0, Math.PI);
+            ctx.stroke();
+            
+            ctx.beginPath();
+            ctx.arc(20, 16, 2, 0, Math.PI);
+            ctx.stroke();
+            
+            // Bottom wrinkles
+            ctx.beginPath();
+            ctx.arc(10, 20, 2, 0, Math.PI);
+            ctx.stroke();
+            
+            ctx.beginPath();
+            ctx.arc(22, 20, 2, 0, Math.PI);
+            ctx.stroke();
+            
+            // Convert to data URL
+            const dataURL = canvas.toDataURL('image/png');
+            
+            // Create download link
+            const link = document.createElement('a');
+            link.download = 'favicon-32x32.png';
+            link.href = dataURL;
+            link.click();
+            
+            console.log('Brain favicon generated!');
+        }
+        
+        // Auto-generate on page load
+        window.onload = function() {
+            generateFavicon();
+        };
+    </script>
+</body>
+</html>

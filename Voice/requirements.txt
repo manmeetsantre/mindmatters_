@@ -1,0 +1,35 @@
+# Core Flask and Web Framework
+Flask
+Werkzeug
+
+# Audio Processing and Speech Recognition
+openai-whisper
+librosa
+pydub
+SpeechRecognition
+soundfile
+
+# Machine Learning and Numerical Computing
+numpy
+scipy
+scikit-learn
+
+# Natural Language Processing
+textblob
+nltk
+
+# Audio Format Support
+ffmpeg-python
+
+# Utility Libraries
+requests
+python-multipart
+
+# Optional: Enhanced Audio Features
+pyaudio  # For real-time audio (optional)
+torch     # If you want to use PyTorch-based models
+torchaudio
+
+# Development and Testing
+pytest
+pytest-flask

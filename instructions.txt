@@ -1,0 +1,6 @@
+cd Voice
+cd "f:\MindMatters"
+pip install -r Voice/requirements.txt
+cd Voice
+cd "f:\MindMatters"
+python Voice/voice_assistant.py

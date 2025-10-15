@@ -1,0 +1,461 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+const express_1 = require("express");
+const setup_1 = require("../setup");
+const middleware_1 = require("../middleware");
+const router = (0, express_1.Router)();
+// Get real-time crew status dashboard
+router.get("/dashboard", middleware_1.requireAuth, async (req, res) => {
+    try {
+        const db = (0, setup_1.getDb)();
+        // Get all crew members with their latest emotional states
+        const crewStatus = db.prepare(`
+      SELECT 
+        cm.id,
+        cm.name,
+        cm.role,
+        cm.status,
+        cea.timestamp as last_analysis,
+        cea.emotion_data,
+        cea.confidence_scores,
+        cea.analysis_type,
+        COUNT(ci.id) as critical_issues_count
+      FROM crew_members cm
+      LEFT JOIN crew_emotion_analysis cea ON cm.id = cea.crew_member_id
+      LEFT JOIN critical_issues ci ON cm.id = ci.crew_member_id 
+        AND ci.timestamp >= datetime('now', '-24 hours')
+        AND ci.resolved = 0
+      GROUP BY cm.id
+      ORDER BY cea.timestamp DESC
+    `).all();
+        // Get recent critical issues
+        const recentIssues = db.prepare(`
+      SELECT 
+        ci.*,
+        cm.name as crew_member_name,
+        cm.role as crew_member_role
+      FROM critical_issues ci
+      JOIN crew_members cm ON ci.crew_member_id = cm.id
+      WHERE ci.timestamp >= datetime('now', '-24 hours')
+      ORDER BY ci.timestamp DESC
+    `).all();
+        // Get mission phase information
+        const currentPhase = db.prepare(`
+      SELECT * FROM mission_phases 
+      WHERE start_date <= datetime('now') 
+      AND (end_date IS NULL OR end_date >= datetime('now'))
+      ORDER BY start_date DESC
+      LIMIT 1
+    `).get();
+        // Get system health metrics
+        const systemHealth = db.prepare(`
+      SELECT 
+        COUNT(DISTINCT cea.crew_member_id) as active_monitoring,
+        COUNT(ci.id) as unresolved_issues,
+        AVG(CAST(JSON_EXTRACT(cea.confidence_scores, '$.neutral') AS REAL)) as avg_confidence
+      FROM crew_emotion_analysis cea
+      LEFT JOIN critical_issues ci ON ci.resolved = 0
+      WHERE cea.timestamp >= datetime('now', '-1 hour')
+    `).get();
+        db.close();
+        res.json({
+            success: true,
+            dashboard: {
+                crewStatus,
+                recentIssues,
+                currentPhase,
+                systemHealth,
+                lastUpdated: new Date().toISOString()
+            }
+        });
+    }
+    catch (error) {
+        console.error('Dashboard error:', error);
+        res.status(500).json({ error: "Failed to retrieve dashboard data" });
+    }
+});
+// Get detailed crew member analysis
+router.get("/crew/:crewMemberId/analysis", middleware_1.requireAuth, async (req, res) => {
+    try {
+        const { crewMemberId } = req.params;
+        const { hours = 24 } = req.query;
+        const db = (0, setup_1.getDb)();
+        // Get emotional analysis history
+        const emotionHistory = db.prepare(`
+      SELECT 
+        cea.*,
+        cea.timestamp,
+        cea.emotion_data,
+        cea.confidence_scores,
+        cea.analysis_type
+      FROM crew_emotion_analysis cea
+      WHERE cea.crew_member_id = ?
+      AND cea.timestamp >= datetime('now', '-${hours} hours')
+      ORDER BY cea.timestamp DESC
+    `).all(crewMemberId);
+        // Get critical issues for this crew member
+        const criticalIssues = db.prepare(`
+      SELECT * FROM critical_issues 
+      WHERE crew_member_id = ?
+      AND timestamp >= datetime('now', '-${hours} hours')
+      ORDER BY timestamp DESC
+    `).all(crewMemberId);
+        // Get AI companion conversations
+        const conversations = db.prepare(`
+      SELECT * FROM ai_companion_conversations 
+      WHERE crew_member_id = ?
+      AND timestamp >= datetime('now', '-${hours} hours')
+      ORDER BY timestamp DESC
+    `).all(crewMemberId);
+        // Get wellness metrics
+        const wellnessMetrics = db.prepare(`
+      SELECT * FROM crew_wellness_metrics 
+      WHERE crew_member_id = ?
+      AND timestamp >= datetime('now', '-${hours} hours')
+      ORDER BY timestamp DESC
+    `).all(crewMemberId);
+        // Generate emotional trend analysis
+        const trendAnalysis = analyzeEmotionalTrends(emotionHistory);
+        // Generate risk assessment
+        const riskAssessment = assessCrewMemberRisk(emotionHistory, criticalIssues);
+        db.close();
+        res.json({
+            success: true,
+            analysis: {
+                crewMemberId,
+                timeRange: `${hours} hours`,
+                emotionHistory,
+                criticalIssues,
+                conversations,
+                wellnessMetrics,
+                trendAnalysis,
+                riskAssessment,
+                lastUpdated: new Date().toISOString()
+            }
+        });
+    }
+    catch (error) {
+        console.error('Crew analysis error:', error);
+        res.status(500).json({ error: "Failed to retrieve crew analysis" });
+    }
+});
+// Send alert to ground control
+router.post("/alerts", middleware_1.requireAuth, async (req, res) => {
+    try {
+        const { crewMemberId, alertType, severity, message, autoGenerated } = req.body;
+        const db = (0, setup_1.getDb)();
+        const alert = db.prepare(`
+      INSERT INTO ground_control_alerts 
+      (crew_member_id, alert_type, severity, message, auto_generated, timestamp)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run(crewMemberId, alertType, severity, message, autoGenerated || false, new Date().toISOString());
+        // Emit real-time alert via Socket.IO
+        const io = req.app.get('io');
+        if (io) {
+            io.emit('ground_control_alert', {
+                id: alert.lastInsertRowid,
+                crewMemberId,
+                alertType,
+                severity,
+                message,
+                timestamp: new Date().toISOString()
+            });
+        }
+        db.close();
+        res.json({
+            success: true,
+            alertId: alert.lastInsertRowid,
+            message: "Alert sent to ground control"
+        });
+    }
+    catch (error) {
+        console.error('Alert error:', error);
+        res.status(500).json({ error: "Failed to send alert" });
+    }
+});
+// Get mission analytics
+router.get("/analytics", middleware_1.requireAuth, async (req, res) => {
+    try {
+        const { days = 7 } = req.query;
+        const db = (0, setup_1.getDb)();
+        // Get emotional distribution over time
+        const emotionalDistribution = db.prepare(`
+      SELECT 
+        DATE(timestamp) as date,
+        JSON_EXTRACT(emotion_data, '$.primary') as primary_emotion,
+        COUNT(*) as count
+      FROM crew_emotion_analysis 
+      WHERE timestamp >= datetime('now', '-${days} days')
+      GROUP BY DATE(timestamp), primary_emotion
+      ORDER BY date DESC
+    `).all();
+        // Get stress level trends
+        const stressTrends = db.prepare(`
+      SELECT 
+        DATE(timestamp) as date,
+        AVG(CAST(JSON_EXTRACT(confidence_scores, '$.angry') AS REAL) + 
+            CAST(JSON_EXTRACT(confidence_scores, '$.fearful') AS REAL) +
+            CAST(JSON_EXTRACT(confidence_scores, '$.sad') AS REAL)) as stress_level
+      FROM crew_emotion_analysis 
+      WHERE timestamp >= datetime('now', '-${days} days')
+      GROUP BY DATE(timestamp)
+      ORDER BY date DESC
+    `).all();
+        // Get critical issues by type
+        const issuesByType = db.prepare(`
+      SELECT 
+        issue_type,
+        severity,
+        COUNT(*) as count
+      FROM critical_issues 
+      WHERE timestamp >= datetime('now', '-${days} days')
+      GROUP BY issue_type, severity
+    `).all();
+        // Get AI companion usage
+        const companionUsage = db.prepare(`
+      SELECT 
+        DATE(timestamp) as date,
+        COUNT(*) as conversation_count,
+        COUNT(DISTINCT crew_member_id) as unique_users
+      FROM ai_companion_conversations 
+      WHERE timestamp >= datetime('now', '-${days} days')
+      GROUP BY DATE(timestamp)
+      ORDER BY date DESC
+    `).all();
+        // Get crew performance metrics
+        const performanceMetrics = db.prepare(`
+      SELECT 
+        cm.name,
+        cm.role,
+        COUNT(cea.id) as total_analyses,
+        AVG(CAST(JSON_EXTRACT(cea.confidence_scores, '$.neutral') AS REAL)) as avg_confidence,
+        COUNT(ci.id) as critical_issues
+      FROM crew_members cm
+      LEFT JOIN crew_emotion_analysis cea ON cm.id = cea.crew_member_id 
+        AND cea.timestamp >= datetime('now', '-${days} days')
+      LEFT JOIN critical_issues ci ON cm.id = ci.crew_member_id 
+        AND ci.timestamp >= datetime('now', '-${days} days')
+      GROUP BY cm.id, cm.name, cm.role
+    `).all();
+        db.close();
+        res.json({
+            success: true,
+            analytics: {
+                timeRange: `${days} days`,
+                emotionalDistribution,
+                stressTrends,
+                issuesByType,
+                companionUsage,
+                performanceMetrics,
+                generatedAt: new Date().toISOString()
+            }
+        });
+    }
+    catch (error) {
+        console.error('Analytics error:', error);
+        res.status(500).json({ error: "Failed to retrieve analytics" });
+    }
+});
+// Acknowledge critical issue
+router.post("/issues/:issueId/acknowledge", middleware_1.requireAuth, async (req, res) => {
+    try {
+        const { issueId } = req.params;
+        const { acknowledgedBy } = req.body;
+        const db = (0, setup_1.getDb)();
+        const result = db.prepare(`
+      UPDATE critical_issues 
+      SET resolved = 1, resolved_at = ?, resolved_by = ?
+      WHERE id = ?
+    `).run(new Date().toISOString(), acknowledgedBy, issueId);
+        if (result.changes === 0) {
+            return res.status(404).json({ error: "Issue not found" });
+        }
+        // Emit real-time update
+        const io = req.app.get('io');
+        if (io) {
+            io.emit('issue_resolved', {
+                issueId,
+                resolvedBy: acknowledgedBy,
+                timestamp: new Date().toISOString()
+            });
+        }
+        db.close();
+        res.json({
+            success: true,
+            message: "Issue acknowledged and resolved"
+        });
+    }
+    catch (error) {
+        console.error('Acknowledge issue error:', error);
+        res.status(500).json({ error: "Failed to acknowledge issue" });
+    }
+});
+// Get real-time monitoring status
+router.get("/monitoring/status", middleware_1.requireAuth, async (req, res) => {
+    try {
+        const db = (0, setup_1.getDb)();
+        // Get active monitoring sessions
+        const activeSessions = db.prepare(`
+      SELECT 
+        ms.*,
+        cm.name as crew_member_name,
+        cm.role as crew_member_role
+      FROM monitoring_sessions ms
+      JOIN crew_members cm ON ms.crew_member_id = cm.id
+      WHERE ms.status = 'active'
+    `).all();
+        // Get system health status
+        const systemStatus = db.prepare(`
+      SELECT 
+        COUNT(DISTINCT cea.crew_member_id) as active_monitoring,
+        COUNT(ci.id) as unresolved_critical_issues,
+        COUNT(gca.id) as pending_alerts
+      FROM crew_emotion_analysis cea
+      LEFT JOIN critical_issues ci ON ci.resolved = 0
+      LEFT JOIN ground_control_alerts gca ON gca.acknowledged = 0
+      WHERE cea.timestamp >= datetime('now', '-1 hour')
+    `).get();
+        // Get recent activity
+        const recentActivity = db.prepare(`
+      SELECT 
+        'emotion_analysis' as type,
+        cea.timestamp,
+        cm.name as crew_member_name,
+        JSON_EXTRACT(cea.emotion_data, '$.primary') as primary_emotion
+      FROM crew_emotion_analysis cea
+      JOIN crew_members cm ON cea.crew_member_id = cm.id
+      WHERE cea.timestamp >= datetime('now', '-1 hour')
+      
+      UNION ALL
+      
+      SELECT 
+        'critical_issue' as type,
+        ci.timestamp,
+        cm.name as crew_member_name,
+        ci.issue_type as primary_emotion
+      FROM critical_issues ci
+      JOIN crew_members cm ON ci.crew_member_id = cm.id
+      WHERE ci.timestamp >= datetime('now', '-1 hour')
+      
+      ORDER BY timestamp DESC
+      LIMIT 20
+    `).all();
+        db.close();
+        res.json({
+            success: true,
+            monitoring: {
+                activeSessions,
+                systemStatus,
+                recentActivity,
+                lastUpdated: new Date().toISOString()
+            }
+        });
+    }
+    catch (error) {
+        console.error('Monitoring status error:', error);
+        res.status(500).json({ error: "Failed to retrieve monitoring status" });
+    }
+});
+// Helper functions
+function analyzeEmotionalTrends(emotionHistory) {
+    if (emotionHistory.length === 0) {
+        return { trend: 'insufficient_data', confidence: 0 };
+    }
+    // Analyze emotional patterns over time
+    const emotions = emotionHistory.map(entry => {
+        const emotionData = JSON.parse(entry.emotion_data);
+        return {
+            timestamp: entry.timestamp,
+            primary: emotionData.primary,
+            confidence: entry.confidence_scores ? JSON.parse(entry.confidence_scores) : {}
+        };
+    });
+    // Calculate trend
+    const recentEmotions = emotions.slice(0, 5);
+    const olderEmotions = emotions.slice(5, 10);
+    if (recentEmotions.length === 0) {
+        return { trend: 'insufficient_data', confidence: 0 };
+    }
+    // Simple trend analysis
+    const stressEmotions = ['angry', 'fearful', 'sad'];
+    const recentStressCount = recentEmotions.filter(e => stressEmotions.includes(e.primary)).length;
+    const olderStressCount = olderEmotions.filter(e => stressEmotions.includes(e.primary)).length;
+    let trend = 'stable';
+    if (recentStressCount > olderStressCount) {
+        trend = 'increasing_stress';
+    }
+    else if (recentStressCount < olderStressCount) {
+        trend = 'decreasing_stress';
+    }
+    return {
+        trend,
+        confidence: recentEmotions.length / 10,
+        dominantEmotion: recentEmotions[0]?.primary || 'neutral',
+        stressLevel: recentStressCount / recentEmotions.length
+    };
+}
+function assessCrewMemberRisk(emotionHistory, criticalIssues) {
+    const riskFactors = [];
+    let riskLevel = 'low';
+    // Check for recent critical issues
+    const recentIssues = criticalIssues.filter(issue => new Date(issue.timestamp) > new Date(Date.now() - 24 * 60 * 60 * 1000));
+    if (recentIssues.length > 0) {
+        riskFactors.push('recent_critical_issues');
+        riskLevel = 'high';
+    }
+    // Check emotional patterns
+    if (emotionHistory.length > 0) {
+        const recentEmotions = emotionHistory.slice(0, 5);
+        const stressEmotions = recentEmotions.filter(entry => {
+            const emotionData = JSON.parse(entry.emotion_data);
+            return ['angry', 'fearful', 'sad'].includes(emotionData.primary);
+        });
+        if (stressEmotions.length > recentEmotions.length * 0.6) {
+            riskFactors.push('high_stress_pattern');
+            if (riskLevel === 'low')
+                riskLevel = 'medium';
+        }
+    }
+    return {
+        riskLevel,
+        riskFactors,
+        recommendations: generateRiskRecommendations(riskLevel, riskFactors)
+    };
+}
+function generateRiskRecommendations(riskLevel, riskFactors) {
+    const recommendations = [];
+    if (riskLevel === 'high') {
+        recommendations.push({
+            type: 'immediate_intervention',
+            priority: 'critical',
+            action: 'Implement immediate psychological support and monitoring',
+            frequency: 'continuous'
+        });
+    }
+    else if (riskLevel === 'medium') {
+        recommendations.push({
+            type: 'increased_monitoring',
+            priority: 'high',
+            action: 'Increase monitoring frequency and provide additional support',
+            frequency: 'multiple times daily'
+        });
+    }
+    if (riskFactors.includes('recent_critical_issues')) {
+        recommendations.push({
+            type: 'crisis_management',
+            priority: 'high',
+            action: 'Review and address recent critical issues',
+            frequency: 'immediate'
+        });
+    }
+    if (riskFactors.includes('high_stress_pattern')) {
+        recommendations.push({
+            type: 'stress_management',
+            priority: 'medium',
+            action: 'Implement stress management techniques',
+            frequency: 'daily'
+        });
+    }
+    return recommendations;
+}
+exports.default = router;
