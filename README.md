@@ -331,9 +331,6 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - **Project Lead**: Ayush Shevde
 - **Technical Lead**: Manmeet Santre
 
-**Academic Advisor**
-- **Professor H.B. Mali** - Department of Computer Engineering, [Institution]
-
 ---
 
 **MAITRI** - Pioneering AI-powered psychological support for India's space program. 🧠🚀
